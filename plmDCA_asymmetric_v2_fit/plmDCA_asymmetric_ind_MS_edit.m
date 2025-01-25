@@ -1,0 +1,231 @@
+% Copyright 2014 - by Magnus Ekeberg (magnus.ekeberg@gmail.com)
+% All rights reserved
+% 
+% Permission is granted for anyone to copy, use, or modify this
+% software for any uncommercial purposes, provided this copyright 
+% notice is retained, and note is made of any changes that have 
+% been made. This software is distributed without any warranty, 
+% express or implied. In no event shall the author or contributors be 
+% liable for any damage arising out of the use of this software.
+% 
+% The publication of research using this software, modified or not, must include 
+% appropriate citations to:
+%
+% 	M. Ekeberg, C. Lövkvist, Y. Lan, M. Weigt, E. Aurell, Improved contact
+% 	prediction in proteins: Using pseudolikelihoods to infer Potts models, Phys. Rev. E 87, 012707 (2013)
+%
+%	M. Ekeberg, T. Hartonen, E. Aurell, Fast pseudolikelihood
+%	maximization for direct-coupling analysis of protein structure
+%	from many homologous amino-acid sequences, J. Comput. Phys. 276, 341-356 (2014)
+% 
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%Modifications made by MS
+%
+%Removed fitting for J from model, i.e. fits just independent model
+%
+%Hard-coded a reweighting threshold of 0.8 (0.2 entered into code)
+%      As part of this removed rewieghting_threhold varaible from call
+%
+%   Hard-coded in regularization strength of 0.01
+%
+%   Exporting various matrices used for analysis
+
+
+function plmDCA_asymmetric_only_h_MS_edit(fastafile,outputfile,nr_of_cores)
+%If should-be numericals are passed as strings, convert them.
+    if (isstr(nr_of_cores))
+        nr_of_cores = str2num(nr_of_cores);
+    end
+
+%Minimization options
+    options.method='lbfgs'; %Minimization scheme. Default: 'lbfgs', 'cg' for conjugate gradient (use 'cg' if out of RAM).
+    options.Display='off';
+    options.progTol=1e-9; %Threshold for when to terminate the descent. Default: 1e-9. 
+%A note on progTol: In our experiments on PFAM-families, a progTol of 1e-3 gave identical true-positive rates to 1e-9 (default), but with moderately shorter running time. Differences in the scores between progTol 1e-3 and 1e-9 showed up in the 3rd-4th decimal or so (which tends to matter little when ranking them). We here set 1e-7 to be on the safe side, but this can be raised to gain speed. If, however, one wishes to use the scores for some different application, or extract and use the parameters {h,J} directly, we recommend the default progTol 1e-9.
+
+    addpath(genpath(pwd))
+    
+%Read inputfile (removing inserts), remove duplicate sequences, and calculate weights and B_eff.
+    [N,B_with_id_seq,q,Y]=return_alignment(fastafile);
+    Y=unique(Y,'rows');
+    [B,N]=size(Y);
+    weights = ones(B,1);
+    
+    
+     %%%%%%%%%%%%%%Added by MS to hard-code in value
+    %change here if want to alter
+    %remember that for a reweighting threshold of X, enter 1-X into code
+    %e.g. to use 80% identity as a threhold, set value of 0.2
+    reweighting_threshold = 0.2;
+    
+    
+    if reweighting_threshold>0.0
+        fprintf('Starting to calculate weights \n...');
+        tic
+        %Reweighting in MATLAB:            
+        %weights = (1./(1+sum(squareform(pdist(Y,'hamm')<=reweighting_threshold))))';       
+	     
+        %Reweighting in C:
+        Y=int32(Y);
+        m=calc_inverse_weights(Y-1,reweighting_threshold);
+        weights=1./m;
+
+
+        fprintf('Finished calculating weights \n');
+        toc
+    end
+    B_eff=sum(weights);
+    fprintf('### N = %d B_with_id_seq = %d B = %d B_eff = %.2f q = %d\n',N,B_with_id_seq,B,B_eff,q);
+   	
+%Prepare inputs to optimizer.
+    %Automatic specification of regularization strength based on B_eff. B_eff>500 means the standard regularization 0.01 is used, while B_eff<=500 means a higher regularization is chosen.
+   
+    
+    %%%%%%%%%%%%%Code commented out by MS %%%%%%%%
+    %lambda_J is regularization coefficient
+    %will hard-code in value of 0.01
+    %uncomment out subsequent code if want to adjust regularization based
+    %on effective sequences in set
+    
+    %if B_eff>500
+    %    lambda_J=0.01;
+    %else
+    %    lambda_J=0.1-(0.1-0.01)*B_eff/500;
+    %end 
+    
+    %%%%%%%%%%%%%%%%%Code added by MS
+    %If want to change regularization strength change value of lambda_J
+    %here
+    lambda_h = 0.01;
+    scaled_lambda_h=lambda_h*B_eff;   
+
+    Y=int32(Y);q=int32(q);
+    w=zeros(q,N); %Matrix in which to store parameter estimates (column r will contain estimates from g_r).
+%Run optimizer.
+    if nr_of_cores>1
+        parpool(nr_of_cores)   
+        tic
+        parfor r=1:N
+            disp(strcat('Minimizing g_r for node r=',int2str(r)))       
+            wr=min_g_r(Y,weights,N,q,scaled_lambda_h,r,options);
+            w(:,r)=wr;
+        end
+        toc
+        delete(gcp('nocreate'))
+    else
+        tic
+        for r=1:N
+            disp(strcat('Minimizing g_r for node r=',int2str(r)))       
+            wr=min_g_r(Y,weights,N,q,scaled_lambda_h,r,options);
+            w(:,r)=wr;
+            if r == N
+                disp(size(w))
+            end
+        end
+        toc
+    end
+    
+    h = transpose(w(1:q,:));
+    save('h_onlyH.mat','h')
+end
+
+function [wr]=min_g_r(Y,weights,N,q,scaled_lambda_h,r,options)
+%Creates function object for (regularized) g_r and minimizes it using minFunc.
+    r=int32(r);
+    funObj=@(wr)g_r(wr,Y,weights,N,q,scaled_lambda_h,r);        
+    wr0=zeros(q,1);
+    wr=minFunc(funObj,wr0,options);    
+end
+
+function [fval,grad] = g_r(wr,Y,weights,N,q,lambdah,r)
+%Evaluates (regularized) g_r using the mex-file.
+	h_r=reshape(wr(1:q),1,q);
+
+	r=int32(r);
+	[fval,grad1] = g_rC_only_h(Y-1,weights,h_r,[lambdah],r);
+	grad = [grad1(:)];
+end
+
+function [N,B,q,Y] = return_alignment(inputfile)
+%Reads alignment from inputfile, removes inserts and converts into numbers.
+    align_full = fastaread(inputfile);
+    B = length(align_full);
+    ind = align_full(1).Sequence ~= '.' & align_full(1).Sequence == upper( align_full(1).Sequence );
+    N = sum(ind);
+    Y = zeros(B,N);
+
+    for i=1:B
+        counter = 0;
+        for j=1:length(ind)
+            if( ind(j) )
+                counter = counter + 1;
+                Y(i,counter)=letter2number( align_full(i).Sequence(j) );
+            end
+        end
+    end
+    q=max(max(Y));
+end
+
+function x=letter2number(a)
+    switch(a)
+        % full AA alphabet
+        case '-'
+             x=1;
+        case 'A'    
+            x=2;    
+        case 'C'    
+            x=3;
+        case 'D'
+            x=4;
+        case 'E'  
+            x=5;
+        case 'F'
+            x=6;
+        case 'G'  
+            x=7;
+        case 'H'
+            x=8;
+        case 'I'  
+            x=9;
+        case 'K'
+            x=10;
+        case 'L'  
+            x=11;
+        case 'M'
+            x=12;
+        case 'N'  
+            x=13;
+        case 'P'
+            x=14;
+        case 'Q'
+            x=15;
+        case 'R'
+            x=16;
+        case 'S'  
+            x=17;
+        case 'T'
+            x=18;
+        case 'V'
+            x=19;
+        case 'W'
+            x=20;
+        case 'Y'
+            x=21;
+        otherwise
+            x=1;
+    end
+end
+
+
+
+
+
+
+
+
+
+
+
+
