@@ -12,15 +12,15 @@ from copy import deepcopy
 from multiprocessing import Pool
 import time
 
-path='/home-3/msternk1@jhu.edu/scratch/mcmc_potts/hd/simulations/fit_200203/200916_lJ0p01_hj_gauge_transformed/'
-msaFile='/home-3/msternk1@jhu.edu/scratch/mcmc_potts/hd/msa_files/hd_full_gapStrip.txt'
-hWeight = 1
-jWeight = 1
-hFile='h_sw80_lJ0p01_gauge_transformed.npy'
-jFile='Jtrans_sw80_lJ0p01.mat'
+### INPUT PARAMETERS FOR RUN ###
+path='./'
+msaFile='../MSAs/hd_potts_alignment.txt'
+hFile='h_xid80_lambda0p01.npy'
+jFile='J_xid80_lJ0p01.mat'
 jMatName = 'Jtrans'
 
-random.seed(4832)
+### SIMULATION HYPERPARAMETERS FOR RUN ###
+seed = 4832
 nRounds = 100000
 nSeqMSAs = 1000
 betaSet = 0.1
@@ -29,6 +29,8 @@ betaStepInc = nRounds / 20
 jWeight = 1
 hWeight = 1
 numCores = 24
+
+random.seed(seed)
 
 def readHFile(file):
     mat = sio.loadmat(file)
@@ -311,15 +313,6 @@ if __name__ == '__main__':
     axes[1].set_xlabel('MC step')
     fig.savefig(path + 'MC_Jtot.png', bbox_inches='tight', dpi = 400)
     plt.close()
-
-    fig, axes = plt.subplots(2,1,sharex=True,gridspec_kw={'height_ratios':[1,4]})
-    axes[0].plot(betaTrack,'r-')
-    axes[1].plot(x[:,:,2])
-    axes[0].set_ylabel('1 / kT')
-    axes[1].set_ylabel('Raw E seq')
-    axes[1].set_xlabel('MC step')
-    fig.savefig(path + 'MC_Etot_raw.png', bbox_inches='tight', dpi = 400)
-    plt.close()
     
     fig, axes = plt.subplots(2,1,sharex=True,gridspec_kw={'height_ratios':[1,4]})
     axes[0].plot(betaTrack,'r-')
@@ -330,19 +323,9 @@ if __name__ == '__main__':
     fig.savefig(path + 'MC_Etot.png', bbox_inches='tight', dpi = 400)
     plt.close()
 
-    fig, ax = plt.subplots()
-    ax.hist(np.array(eDiffsTrans).flatten(), bins = 'doane', edgecolor = 'black', facecolor = 'blue', alpha = 0.5)
-    ax.set_xlabel('Emut - E')
-    ax.set_ylabel('Count')
-    fig.savefig(path + 'e_diffs_hist.png', bbox_inches='tight',dpi = 300)
-    plt.close()
-
     inSeqsFasta = makeFasta(inSeqs)
     outSeqsFasta = makeFasta(finalSeqs)
 
-    with open(path + 'input_seqs.txt','w') as f:
-        for i in range(len(inSeqsFasta)):
-            f.write(inSeqsFasta[i])
     with open(path + 'final_seqs.txt','w') as f:
         for i in range(len(outSeqsFasta)):
             f.write(outSeqsFasta[i])
