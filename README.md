@@ -7,7 +7,7 @@ Descriptions for each of the directories is as follows:
 Code for fitting the Potts model as described in the paper. Descriptions and instructions for running and analyzing the code are found in the README within the [directory](https://github.com/barricklab-at-jhu/Potts_analysis_Sternke_Tripp_Barrick/tree/main/plmDCA_asymmetric_v2_fit). 
 
 ## MSAs
-Contains the multiple sequence alignments (MSAs) used to fit the Potts model code in the `plmDCA_asymmetric_v2_fit` directory for all protein families examined in the paper. 
+Contains the multiple sequence alignments (MSAs) used to fit the Potts model code in the `plmDCA_asymmetric_v2_fit` directory for all protein families examined in the paper. A description of generating and processing a MSA for a protein family is given in thhe README within the [directory](https://github.com/barricklab-at-jhu/Potts_analysis_Sternke_Tripp_Barrick/tree/main/MSAs).
 
 ## potts_fits_parameters
 Resulting coefficients from the Potts model fits for protein families examined in the paper. 
